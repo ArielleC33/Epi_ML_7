@@ -1,0 +1,269 @@
+---
+title: "Epi_ML_7_Assignment"
+author: "Arielle Coq / AC4140"
+date: "3/3/2020"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(glmnet)
+library (viridis)
+library(Amelia)
+library(devtools)
+library(rpart)
+library(rpart.plot)
+library(pROC)
+library(e1071)
+library(dplyr)
+library(randomForest)
+library(gbm)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%"
+)
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
+```
+
+###Question 1
+
+First cleaned the data the same way that was done in class and partition the data into testing and training data sets to 30/70 partition. Removed the missing values and also created the outcome varaible so that it is Heart disease present or not present. The seed is set at 100 for this analysis. 
+
+```{r}
+heart.data <- read.csv("processed.cleveland.data", header=FALSE)
+
+var.names<-c("age", "sex", "pain_type", "resting_sysbp", "chol", "fast_blsugar_gt120", "rest_ecg", "max_hr", "exerc_angina", "ST_depression", "ST_slope", "vessels_colorflu", "defect", "heart_disease_present")
+
+colnames(heart.data)<-var.names
+str(heart.data)
+
+heart.data[heart.data=="?"]<-NA
+
+heart.data$defect<-as.numeric(factor(heart.data$defect))
+heart.data$vessels_colorflu<-as.numeric(factor(heart.data$vessels_colorflu))
+
+heart.data$outcome<-ifelse(heart.data$heart_disease_present==0, 0,1)
+heart.data$heart_disease_present<-NULL
+heart.data$outcome<-factor(heart.data$outcome)
+levels(heart.data$outcome)<-c("Not Present", "Present")
+str(heart.data)
+summary(heart.data)
+
+#Remove the missings
+heart.data.nomiss<-na.omit(heart.data)
+
+#Set No Heart Disease as Reference Level
+heart.data.nomiss$outcome<-relevel(heart.data.nomiss$outcome, ref="Not Present")
+```
+
+```{r}
+set.seed(100)
+train.indices<-createDataPartition(y=heart.data.nomiss$outcome,p=0.7,list=FALSE)
+
+training<-heart.data.nomiss[train.indices,]
+testing<-heart.data.nomiss[-train.indices,]
+```
+
+###Question 2
+
+The next step in this analysis would be to run a single classification tree (categorical outcome) using all the features in the dataset. Will also calculate an evaluation metrics and outupt the important variables metrics. 
+
+```{r}
+train.control<-trainControl(method="cv", number=10)
+grid.1<-expand.grid(cp=seq(0.001, 0.3, by=0.01))
+tree.HD<-train(outcome~., data=training, method="rpart",trControl=train.control, tuneGrid=grid.1)
+tree.HD$bestTune
+
+tree.HD
+varImp(tree.HD)
+
+rpart.plot(tree.HD$finalModel)
+
+pred.HD<-predict(tree.HD, testing)
+pred.HD.prob<-predict(tree.HD, testing, type="prob")
+
+eval.results<-confusionMatrix(pred.HD, testing$outcome, positive = "Present")
+print(eval.results)
+
+analysis <- roc(response=testing$outcome, predictor=pred.HD.prob[,2])
+plot(1-analysis$specificities,analysis$sensitivities,type="l",
+ylab="Sensitiviy",xlab="1-Specificity",col="black",lwd=2,
+main = "ROC Curve for Greater Firearm Fatalities")
+abline(a=0,b=1)
+```
+
+###Question 3
+
+The next thing I will do is run a random forest to classify heart disease. I will set up a pipeline to try different values of mtry and different numbers of trees to obtain your optimal model. After this I will then run the evaluation metrics and outputting the important variables metrics. 
+
+```{r}
+rf.HD<-randomForest(outcome ~., data=training, mtry=sqrt(ncol(training)-1), importance=TRUE, ntree=100)
+
+rf.HD
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD$err.rate[,1])
+
+#Examine variable importance plots
+varImpPlot(rf.HD)
+
+rf.HD.2<-randomForest(outcome ~., data=training, mtry=sqrt(ncol(training)-1), importance=TRUE, ntree=200)
+
+rf.HD.2
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD.2$err.rate[,1])
+
+#Examine variable importance plots
+varImpPlot(rf.HD.2)
+
+rf.HD.3<-randomForest(outcome ~., data=training, mtry=sqrt(ncol(training)-1), importance=TRUE, ntree=300)
+
+rf.HD.3
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD.3$err.rate[,1])
+
+#Examine variable importance plots
+varImpPlot(rf.HD.3)
+
+#Vary value of mtry-First decrease from 8 to 5
+
+rf.HD.4<-randomForest(outcome ~., data=training, mtry=5, importance=TRUE, ntree=300)
+
+rf.HD.4
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD.4$err.rate[,1])
+
+#Examine variable importance plots
+varImpPlot(rf.HD.4)
+
+#Vary value of mtry-Try increase to 20
+
+rf.HD.5<-randomForest(outcome ~., data=training, mtry=20, importance=TRUE, ntree=300)
+
+rf.HD.5
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD.5$err.rate[,1])
+
+#Examine variable importance plots
+varImpPlot(rf.HD.5)
+
+#Vary value of mtry-Try increase to half of the features, 33
+
+rf.HD.6<-randomForest(outcome ~., data=training, mtry=0.5*(ncol(training)-1), importance=TRUE, ntree=300)
+
+rf.HD.6
+
+#Create plot of Accuracy by tree index 
+plot(1-rf.HD.6$err.rate[,1])
+
+
+#Examine variable importance plots
+varImpPlot(rf.HD.6)
+```
+
+###Question 4
+
+Are there differences in variable importance that you see between a single tree and an ensemble metric? 
+
+Yes, there are some difference in variable importance that I see between a single tree and an ensemble metric. The variable importance for the single classification tree is pain_type while in the ensemble the most importnat variable in this model is defect. 
+
+Are there differences observed across the different variable importance metrics output from the ensemble? 
+
+Yes, there are some differences across the different variable importance metrics output from the ensemble. Some metrics say that defect is the most imoportant variable while others say that vessels_colorflu is the most important model. 
+
+How do you interpret those differences?
+
+Those differences are interpretted as which variables are used in the model and which varible explains the decrease in accuracies that is observed.  
+
+###Question 5
+
+The next thing that I will do is use a boosting algorithm and tune to obtain your optimal model. Compare to the results from the single classification tree and the random forest.
+
+```{r}
+train.data=
+  training %>%
+    mutate(outcome.num = recode(outcome, "Present"= 1, "Not Present" = 0))
+
+train.data$outcome<-NULL
+
+#leaving cvar importance as the default
+gbm.outcome<-gbm(outcome.num ~., data=train.data, distribution='bernoulli', n.trees=2000, shrinkage=0.01)
+summary(gbm.outcome)
+
+#plot of the marginal effect of the selected variable
+plot.gbm(gbm.outcome, 'vessels_colorflu', type="response")
+
+#Plot loss function as a result of n trees added to the ensemble
+gbm.perf(gbm.outcome, plot.it=TRUE, oobag.curve=TRUE, overlay=TRUE, method='OOB')
+
+pred.gbm.outcome<-predict(gbm.outcome, train.data, n.trees=2000, type="response")
+
+pred.gbm.outcome.class<-round(pred.gbm.outcome)
+
+misClasificError <- mean(pred.gbm.outcome.class != train.data$outcome.num)
+print(paste('Accuracy Model',1-misClasificError))
+```
+
+###Question 6
+
+Which model performs the best? Provide justification for your answer.
+
+The model that performed best in this analysis would be the single classification with an accuracy of 82%. The accurancy in the boosting random forest is 92% which suggest some overfitting happening in the model, therefore the single classification tree would be better because it would be more generalizable to other populations. 
+
+###Question 7
+
+How do these results compare to the SVC analysis we did back in Class 6?
+
+Code from class 6- Suppoert Vector Machine 
+
+```{r}
+set.seed(100)
+svm.heart<-svm(outcome ~ ., data=training, kernel="linear", cost=1, scale=TRUE)
+print(svm.heart)
+
+### Cost- hyper parameter 
+svm.pred<-predict(svm.heart, newdata=training[,1:13])
+table(svm.pred, training$outcome)
+
+misClasificError <- mean(svm.pred != training$outcome, na.rm=T)
+print(paste('Accuracy Model 1',1-misClasificError))
+
+features<-training[,1:13]
+outcome<-training$outcome
+
+svm_tune <- tune(svm, train.x=features, train.y=outcome,  kernel="linear", range=list(cost=10^(-1:2)))
+
+summary(svm_tune)
+
+svm.heart.new<-svm(outcome ~ ., data=training, kernel="linear", cost=0.1,  scale=TRUE)
+
+print(svm.heart.new)
+
+svm.pred.new<-predict(svm.heart.new, newdata=training[,1:13])
+table(svm.pred.new, training$outcome)
+
+misClasificError.new <- mean(svm.pred.new != training$outcome, na.rm=T)
+print(paste('Accuracy Model 1',1-misClasificError.new))
+```
+
+The Accuracy for the support vector machine with linear kernel is 86% which is in between both the random forest (92%) and the single classification tree (82%) and therefore might be the best model to use in this case. 
+
+
